@@ -2,6 +2,17 @@
 
 # Qwen Image Edit 2511
 
+## Catline production contract
+
+This fork's production path requires a pre-seeded RunPod Network Volume. Startup validates the pinned
+`models.json` manifest and its full-verification marker and never downloads weights. Seed the shared
+volume once with `python /opt/catline/seed_models.py` from a temporary Pod.
+
+Catline sends one to three private R2 reference URLs. Only HTTPS hosts listed in
+`R2_ALLOWED_DOWNLOAD_HOSTS` are accepted. References are normalized to the `1080x1920` canvas and
+removed from the ComfyUI input directory after the job. The result is a single lossless WebP uploaded
+directly to the provided presigned PUT; the response contains only `asset` metadata and timings.
+
 🚀 **AI image editing with enhanced consistency** - Edit images using text instructions with the Qwen-Image-Edit-2511 model. Supports single-image and multi-image editing with Lightning 4-step acceleration.
 
 ## 🎯 **Key Capabilities**

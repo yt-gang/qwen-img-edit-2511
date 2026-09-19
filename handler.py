@@ -1,5 +1,4 @@
 import runpod
-from runpod.serverless.utils import rp_upload
 import json
 import urllib.request
 import urllib.parse
@@ -10,11 +9,18 @@ import base64
 from io import BytesIO
 import websocket
 import uuid
-import tempfile
 import socket
 import traceback
 import copy
 import random
+
+from catline_worker import (
+    ContractError,
+    download_reference_images,
+    models_ready,
+    upload_generated_image,
+    validate_output_target,
+)
 
 # LoRA filenames for the Edit-2511 model
 LORA_FILES = {
@@ -137,6 +143,11 @@ DEFAULT_WORKFLOW = {
         "class_type": "LoadImage",
         "_meta": {"title": "Load Reference Image"}
     },
+    "84": {
+        "inputs": {"image": "source_image.png"},
+        "class_type": "LoadImage",
+        "_meta": {"title": "Load Third Reference Image"}
+    },
     "170:145": {
         "inputs": {"shift": 3.1, "model": ["170:161", 0]},
         "class_type": "ModelSamplingAuraFlow",
@@ -169,7 +180,8 @@ DEFAULT_WORKFLOW = {
             "clip": ["170:162", 0],
             "vae": ["170:146", 0],
             "image1": ["170:160", 0],
-            "image2": ["83", 0]
+            "image2": ["83", 0],
+            "image3": ["84", 0]
         },
         "class_type": "TextEncodeQwenImageEditPlus",
         "_meta": {"title": "TextEncodeQwenImageEditPlus"}
@@ -180,7 +192,8 @@ DEFAULT_WORKFLOW = {
             "clip": ["170:162", 0],
             "vae": ["170:146", 0],
             "image1": ["170:160", 0],
-            "image2": ["83", 0]
+            "image2": ["83", 0],
+            "image3": ["84", 0]
         },
         "class_type": "TextEncodeQwenImageEditPlus",
         "_meta": {"title": "TextEncodeQwenImageEditPlus (Positive)"}
@@ -333,6 +346,7 @@ def build_edit_workflow(
     prompt,
     source_image="source_image.png",
     reference_image=None,
+    third_reference_image=None,
     seed=None,
     steps=4,
     negative_prompt="",
@@ -350,9 +364,18 @@ def build_edit_workflow(
     # Source image
     workflow["41"]["inputs"]["image"] = source_image
 
-    # Reference image — if not provided, reuse the source image (single-image edit)
-    ref_img = reference_image if reference_image else source_image
-    workflow["83"]["inputs"]["image"] = ref_img
+    if reference_image:
+        workflow["83"]["inputs"]["image"] = reference_image
+    else:
+        workflow.pop("83", None)
+        workflow["170:149"]["inputs"].pop("image2", None)
+        workflow["170:151"]["inputs"].pop("image2", None)
+    if third_reference_image:
+        workflow["84"]["inputs"]["image"] = third_reference_image
+    else:
+        workflow.pop("84", None)
+        workflow["170:149"]["inputs"].pop("image3", None)
+        workflow["170:151"]["inputs"].pop("image3", None)
 
     # Edit prompt (positive)
     workflow["170:151"]["inputs"]["prompt"] = prompt
@@ -369,11 +392,16 @@ def build_edit_workflow(
     if use_lora and lora_key:
         workflow["170:153"]["inputs"]["lora_name"] = LORA_FILES[lora_key]
 
+    workflow["170:169"]["inputs"]["model"] = ["170:153", 0] if use_lora else ["170:152", 0]
+
     # Override KSampler inputs directly (bypass switch links)
     workflow["170:169"]["inputs"]["steps"] = steps
     workflow["170:169"]["inputs"]["cfg"] = effective_cfg
     workflow["170:169"]["inputs"]["sampler_name"] = sampler
     workflow["170:169"]["inputs"]["scheduler"] = scheduler
+
+    for unused_node in ("170:154", "170:155", "170:163", "170:164", "170:165", "170:166", "170:167", "170:168"):
+        workflow.pop(unused_node, None)
 
     # Shift (ModelSamplingAuraFlow)
     workflow["170:145"]["inputs"]["shift"] = shift
@@ -478,10 +506,21 @@ def validate_input(job_input):
             else:
                 reference_ref = reference_image
 
+        third_reference_ref = None
+        third_reference_image = job_input.get("third_reference_image")
+        if third_reference_image:
+            third_name = job_input.get("third_reference_image_name", "third_reference_image.png")
+            if third_reference_image.startswith("data:") or len(third_reference_image) > 200:
+                images.append({"name": third_name, "image": third_reference_image})
+                third_reference_ref = third_name
+            else:
+                third_reference_ref = third_reference_image
+
         workflow = build_edit_workflow(
             prompt=prompt,
             source_image=source_ref,
             reference_image=reference_ref,
+            third_reference_image=third_reference_ref,
             seed=job_input.get("seed"),
             steps=_steps_val,
             negative_prompt=job_input.get("negative_prompt", ""),
@@ -508,12 +547,18 @@ def validate_input(job_input):
                 "'images' must be a list of objects with 'name' and 'image' keys",
             )
 
+    try:
+        validate_output_target(job_input.get("output"))
+    except ContractError as exc:
+        return None, str(exc)
+
     comfy_org_api_key = job_input.get("comfy_org_api_key")
 
     return {
         "workflow": workflow,
         "images": images,
         "comfy_org_api_key": comfy_org_api_key,
+        "output": job_input["output"],
     }, None
 
 
@@ -625,6 +670,16 @@ def upload_images(images):
         "message": "All images uploaded successfully",
         "details": responses,
     }
+
+
+def cleanup_input_images(images):
+    for item in images or []:
+        name = item.get("name", "")
+        if name and os.path.basename(name) == name:
+            try:
+                os.remove(os.path.join("/comfyui/input", name))
+            except FileNotFoundError:
+                pass
 
 
 def get_available_models():
@@ -751,7 +806,7 @@ def validate_required_models(required_models):
 
 def download_model(model_config, client_id=None):
     """Download a model using ComfyUI CLI with progress reporting"""
-    import subprocess
+    raise RuntimeError("Runtime model downloads are disabled; seed the Network Volume")
 
     try:
         print(f"worker-comfyui - Downloading {model_config['name']}...")
@@ -815,7 +870,7 @@ def download_model(model_config, client_id=None):
 
 def download_missing_models(missing_models, client_id=None):
     """Download all missing models"""
-    successful = []
+    raise RuntimeError("Runtime model downloads are disabled; seed the Network Volume")
     failed = []
 
     for model_filename in missing_models:
@@ -956,7 +1011,7 @@ def get_image_data(filename, subfolder, image_type):
         return None
 
 
-def handler(job):
+def _handler(job):
     """
     Handles an image editing job using Qwen-Image-Edit-2511 via ComfyUI.
 
@@ -965,14 +1020,27 @@ def handler(job):
     2. Simplified edit: {"input": {"prompt": "edit instruction", "image": "base64...", ...}}
     """
     job_input = job["input"]
-    job_id = job["id"]
+    started_at = time.monotonic()
 
-    # Health-check probe for RunPod Hub test validation — returns immediately
-    # without touching ComfyUI, so the Hub sees a 200 response.
     if isinstance(job_input, dict) and job_input.get("health_check"):
-        print("worker-comfyui - Health check probe received, simulating workload...")
-        time.sleep(3)
+        if not models_ready() or not check_server(f"http://{COMFY_HOST}/", retries=1, delay=1):
+            return {"error": "worker is not ready"}
         return {"status": "healthy"}
+
+    if isinstance(job_input, dict) and job_input.get("reference_image_urls") is not None:
+        try:
+            references = download_reference_images(job_input["reference_image_urls"])
+        except (ContractError, RuntimeError) as exc:
+            return {"error": str(exc)}
+        job_input = dict(job_input)
+        job_input["image"] = references[0]["image"]
+        job_input["image_name"] = references[0]["name"]
+        if len(references) > 1:
+            job_input["reference_image"] = references[1]["image"]
+            job_input["reference_image_name"] = references[1]["name"]
+        if len(references) > 2:
+            job_input["third_reference_image"] = references[2]["image"]
+            job_input["third_reference_image_name"] = references[2]["name"]
 
     validated_data, error_message = validate_input(job_input)
     if error_message:
@@ -980,6 +1048,7 @@ def handler(job):
 
     workflow = validated_data["workflow"]
     input_images = validated_data.get("images")
+    output_target = validated_data["output"]
 
     if not check_server(
         f"http://{COMFY_HOST}/",
@@ -1001,23 +1070,7 @@ def handler(job):
         if missing_models:
             print(f"worker-comfyui - Missing models: {missing_models}")
             print(f"worker-comfyui - Found models: {found_models}")
-            print(f"worker-comfyui - Downloading missing models...")
-
-            successful_downloads, failed_downloads = download_missing_models(missing_models)
-
-            if successful_downloads:
-                print(f"worker-comfyui - Successfully downloaded: {successful_downloads}")
-
-            if failed_downloads:
-                error_msg = f"Failed to download required models: {failed_downloads}"
-                print(f"worker-comfyui - {error_msg}")
-                return {"error": error_msg}
-
-            missing_models, found_models = validate_required_models(required_models)
-            if missing_models:
-                error_msg = f"Still missing required models after download attempt: {missing_models}"
-                print(f"worker-comfyui - {error_msg}")
-                return {"error": error_msg}
+            return {"error": f"Required models are missing from the Network Volume: {missing_models}"}
         else:
             print(f"worker-comfyui - All required models found locally: {found_models}")
 
@@ -1025,6 +1078,7 @@ def handler(job):
     if input_images:
         upload_result = upload_images(input_images)
         if upload_result["status"] == "error":
+            cleanup_input_images(input_images)
             return {
                 "error": "Failed to upload one or more input images",
                 "details": upload_result["details"],
@@ -1164,44 +1218,13 @@ def handler(job):
                     image_bytes = get_image_data(filename, subfolder, img_type)
 
                     if image_bytes:
-                        file_extension = os.path.splitext(filename)[1] or ".png"
-
-                        if os.environ.get("BUCKET_ENDPOINT_URL"):
-                            try:
-                                with tempfile.NamedTemporaryFile(
-                                    suffix=file_extension, delete=False
-                                ) as temp_file:
-                                    temp_file.write(image_bytes)
-                                    temp_file_path = temp_file.name
-                                print(f"worker-comfyui - Wrote image bytes to temporary file: {temp_file_path}")
-
-                                print(f"worker-comfyui - Uploading {filename} to S3...")
-                                s3_url = rp_upload.upload_image(job_id, temp_file_path)
-                                os.remove(temp_file_path)
-                                print(f"worker-comfyui - Uploaded {filename} to S3: {s3_url}")
-                                output_data.append(
-                                    {"filename": filename, "type": "s3_url", "data": s3_url}
-                                )
-                            except Exception as e:
-                                error_msg = f"Error uploading {filename} to S3: {e}"
-                                print(f"worker-comfyui - {error_msg}")
-                                errors.append(error_msg)
-                                if "temp_file_path" in locals() and os.path.exists(temp_file_path):
-                                    try:
-                                        os.remove(temp_file_path)
-                                    except OSError as rm_err:
-                                        print(f"worker-comfyui - Error removing temp file {temp_file_path}: {rm_err}")
-                        else:
-                            try:
-                                base64_image = base64.b64encode(image_bytes).decode("utf-8")
-                                output_data.append(
-                                    {"filename": filename, "type": "base64", "data": base64_image}
-                                )
-                                print(f"worker-comfyui - Encoded {filename} as base64")
-                            except Exception as e:
-                                error_msg = f"Error encoding {filename} to base64: {e}"
-                                print(f"worker-comfyui - {error_msg}")
-                                errors.append(error_msg)
+                        if output_data:
+                            errors.append("workflow produced more than one image; only one output is supported")
+                            continue
+                        upload_started = time.monotonic()
+                        asset = upload_generated_image(image_bytes, output_target)
+                        asset["upload_ms"] = round((time.monotonic() - upload_started) * 1000)
+                        output_data.append(asset)
                     else:
                         error_msg = f"Failed to fetch image data for {filename} from /view endpoint."
                         errors.append(error_msg)
@@ -1232,15 +1255,21 @@ def handler(job):
         if ws and ws.connected:
             print(f"worker-comfyui - Closing websocket connection.")
             ws.close()
+        cleanup_input_images(input_images)
 
     final_result = {}
 
     if output_data:
-        final_result["images"] = output_data
+        upload_ms = output_data[0].pop("upload_ms", 0)
+        final_result["asset"] = output_data[0]
+        final_result["timings"] = {
+            "generation_ms": round((time.monotonic() - started_at) * 1000) - upload_ms,
+            "upload_ms": upload_ms,
+        }
 
     if errors:
-        final_result["errors"] = errors
-        print(f"worker-comfyui - Job completed with errors/warnings: {errors}")
+        print(f"worker-comfyui - Job failed with errors: {errors}")
+        return {"error": "Job processing failed", "details": errors}
 
     if not output_data and errors:
         print(f"worker-comfyui - Job failed with no output images.")
@@ -1251,10 +1280,17 @@ def handler(job):
     elif not output_data and not errors:
         print(f"worker-comfyui - Job completed successfully, but the workflow produced no images.")
         final_result["status"] = "success_no_images"
-        final_result["images"] = []
 
     print(f"worker-comfyui - Job completed. Returning {len(output_data)} image(s).")
     return final_result
+
+
+def handler(job):
+    result = _handler(job)
+    if isinstance(result, dict) and result.get("error"):
+        safe = {key: result[key] for key in ("error", "details") if key in result}
+        raise RuntimeError(json.dumps(safe, ensure_ascii=False))
+    return result
 
 
 if __name__ == "__main__":

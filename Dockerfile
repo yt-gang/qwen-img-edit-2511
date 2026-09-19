@@ -4,9 +4,9 @@ ARG BASE_IMAGE=nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04
 # Stage 1: Base image with all dependencies
 FROM ${BASE_IMAGE} AS base
 
-ARG COMFYUI_VERSION=latest
+ARG COMFYUI_VERSION=v0.3.76
 ARG CUDA_VERSION_FOR_COMFY
-ARG COMFY_CUSTOM_NODES=comfyui-image-saver
+ARG COMFY_CUSTOM_NODES=
 ARG BUILD_VERSION=dev
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -41,7 +41,7 @@ RUN wget -qO- https://astral.sh/uv/install.sh | sh \
 ENV PATH="/opt/venv/bin:${PATH}"
 
 # Install comfy-cli + dependencies
-RUN uv pip install comfy-cli pip setuptools wheel
+RUN uv pip install comfy-cli==1.20.0 pip==25.2 setuptools==80.9.0 wheel==0.45.1
 
 # Install ComfyUI
 RUN if [ -n "${CUDA_VERSION_FOR_COMFY}" ]; then \
@@ -59,8 +59,9 @@ RUN uv pip install --force-reinstall torch torchvision torchaudio --index-url ht
 # Support for the network volume
 ADD src/extra_model_paths.yaml /comfyui/
 
-# Install Python runtime dependencies for the handler
-RUN uv pip install runpod requests websocket-client huggingface_hub piexif
+# Install pinned Python runtime dependencies for the handler
+COPY requirements.txt /tmp/worker-requirements.txt
+RUN uv pip install -r /tmp/worker-requirements.txt
 
 # Add custom node install script
 COPY scripts/comfy-node-install.sh /usr/local/bin/comfy-node-install
@@ -84,13 +85,13 @@ WORKDIR /comfyui
 COPY scripts/comfy-manager-set-mode.sh /usr/local/bin/comfy-manager-set-mode
 RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 
-COPY src/check-models.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/check-models.sh
+COPY models.json scripts/verify_models.py scripts/seed_models.py /opt/catline/
+RUN chmod +x /opt/catline/verify_models.py /opt/catline/seed_models.py
 
 # Go back to root for handler files
 WORKDIR /
 
-ADD src/start.sh handler.py test_input.json ./
+ADD src/start.sh handler.py catline_worker.py test_input.json ./
 RUN chmod +x /start.sh
 
 # Enable high-performance downloads from HuggingFace (hf_xet chunk-based parallel transfers).
@@ -101,7 +102,9 @@ ENV BUILD_VERSION=${BUILD_VERSION}
 
 CMD ["/start.sh"]
 
-# Stage 2: Final image (models download at runtime)
-FROM base AS final
+FROM base AS baked-models
+ARG BAKED_MODEL_BASE=/comfyui/models
+RUN python /opt/catline/seed_models.py --base "${BAKED_MODEL_BASE}"
 
-# Models are downloaded at runtime with hf_xet acceleration (see check-models.sh)
+# Default image: models live on a pre-seeded Network Volume.
+FROM base AS final
