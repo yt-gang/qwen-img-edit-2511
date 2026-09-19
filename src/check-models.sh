@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+exec python /opt/catline/verify_models.py \
+    --manifest /opt/catline/models.json --base /runpod-volume/models
+
 # Use network volume for models and temp when available
 if [ -d /runpod-volume ]; then
     MODEL_BASE="/runpod-volume/models"
