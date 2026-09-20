@@ -32,6 +32,11 @@ LORA_FILES = {
 COMFY_API_AVAILABLE_INTERVAL_MS = 50
 # Maximum number of API check attempts
 COMFY_API_AVAILABLE_MAX_RETRIES = 500
+# The RunPod repository build test can submit its health job before ComfyUI has
+# finished booting. Keep the production default fail-fast, while allowing the
+# test configuration to wait for actual readiness instead of racing startup.
+HEALTH_CHECK_MAX_RETRIES = max(1, int(os.environ.get("CATLINE_HEALTH_CHECK_MAX_RETRIES", "1")))
+HEALTH_CHECK_INTERVAL_MS = max(1, int(os.environ.get("CATLINE_HEALTH_CHECK_INTERVAL_MS", "1")))
 # Websocket reconnection behaviour (can be overridden through environment variables)
 WEBSOCKET_RECONNECT_ATTEMPTS = int(os.environ.get("WEBSOCKET_RECONNECT_ATTEMPTS", 5))
 WEBSOCKET_RECONNECT_DELAY_S = int(os.environ.get("WEBSOCKET_RECONNECT_DELAY_S", 3))
@@ -1023,7 +1028,11 @@ def _handler(job):
     started_at = time.monotonic()
 
     if isinstance(job_input, dict) and job_input.get("health_check"):
-        if not models_ready() or not check_server(f"http://{COMFY_HOST}/", retries=1, delay=1):
+        if not models_ready() or not check_server(
+            f"http://{COMFY_HOST}/",
+            retries=HEALTH_CHECK_MAX_RETRIES,
+            delay=HEALTH_CHECK_INTERVAL_MS,
+        ):
             return {"error": "worker is not ready"}
         return {"status": "healthy"}
 
