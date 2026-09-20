@@ -9,6 +9,7 @@ from PIL import Image
 from catline_worker import (
     ContractError,
     download_reference_images,
+    models_ready,
     upload_generated_image,
 )
 
@@ -70,3 +71,19 @@ def test_reference_download_error_redacts_signed_url():
             allowed_hosts={"r2.example.test"}, request_get=fail,
         )
     assert "do-not-log" not in str(raised.value)
+
+
+def test_models_ready_checks_comfyui_visible_model_paths(tmp_path, monkeypatch):
+    marker = tmp_path / "ready"
+    marker.write_text("verified\n")
+    manifest = tmp_path / "models.json"
+    manifest.write_text('{"files":[{"target":"vae/model.safetensors"}]}')
+    model_base = tmp_path / "comfyui-models"
+    monkeypatch.setenv("MODEL_READY_MARKER", str(marker))
+    monkeypatch.setenv("MODEL_MANIFEST_PATH", str(manifest))
+    monkeypatch.setenv("COMFY_MODEL_BASE", str(model_base))
+
+    assert not models_ready()
+    (model_base / "vae").mkdir(parents=True)
+    (model_base / "vae/model.safetensors").write_bytes(b"model")
+    assert models_ready()

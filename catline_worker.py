@@ -4,8 +4,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
@@ -124,4 +126,13 @@ def upload_generated_image(image_bytes: bytes, raw_target: object, *, request_pu
 
 def models_ready() -> bool:
     marker = os.environ.get("MODEL_READY_MARKER")
-    return bool(marker and os.path.isfile(marker))
+    if not marker or not os.path.isfile(marker):
+        return False
+    if os.environ.get("CATLINE_BUILD_TEST", "").lower() == "true":
+        return True
+    try:
+        manifest = json.loads(Path(os.environ.get("MODEL_MANIFEST_PATH", "/opt/catline/models.json")).read_text())
+        model_base = Path(os.environ.get("COMFY_MODEL_BASE", "/comfyui/models"))
+        return all((model_base / item["target"]).is_file() for item in manifest["files"])
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return False
