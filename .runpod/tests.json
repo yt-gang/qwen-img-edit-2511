@@ -18,6 +18,14 @@
         "value": "true"
       },
       {
+        "key": "CATLINE_HEALTH_CHECK_MAX_RETRIES",
+        "value": "180"
+      },
+      {
+        "key": "CATLINE_HEALTH_CHECK_INTERVAL_MS",
+        "value": "1000"
+      },
+      {
         "key": "REFRESH_WORKER",
         "value": "false"
       }
