@@ -9,4 +9,5 @@ runpod_worker_comfy:
   loras: models/loras/
   upscale_models: models/upscale_models/
   vae: models/vae/
+  diffusion_models: models/diffusion_models/
   unet: models/unet/

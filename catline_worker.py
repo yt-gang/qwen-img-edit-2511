@@ -132,7 +132,7 @@ def models_ready() -> bool:
         return True
     try:
         manifest = json.loads(Path(os.environ.get("MODEL_MANIFEST_PATH", "/opt/catline/models.json")).read_text())
-        model_base = Path(os.environ.get("COMFY_MODEL_BASE", "/comfyui/models"))
+        model_base = Path(os.environ.get("COMFY_MODEL_BASE", "/runpod-volume/models"))
         return all((model_base / item["target"]).is_file() for item in manifest["files"])
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
         return False

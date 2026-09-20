@@ -5,6 +5,7 @@ echo "worker-comfyui: Build version ${BUILD_VERSION:-unknown}"
 # SYMLINK MODEL DIRS TO NETWORK VOLUME IF PRESENT
 if [ -d /runpod-volume ]; then
     echo "worker-comfyui: Network volume detected, symlinking model dirs to /runpod-volume/models"
+    export COMFY_MODEL_BASE=/runpod-volume/models
     for dir in diffusion_models clip vae loras controlnet; do
         mkdir -p "/runpod-volume/models/$dir"
         # The base image pre-creates these directories. `ln -sfnT` cannot
@@ -16,6 +17,7 @@ if [ -d /runpod-volume ]; then
     done
 else
     echo "worker-comfyui: No network volume detected, using local model storage"
+    export COMFY_MODEL_BASE=/comfyui/models
 fi
 
 # GitHub deployments run their container smoke test without attaching endpoint
