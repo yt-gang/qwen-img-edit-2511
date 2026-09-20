@@ -13,13 +13,21 @@ else
     echo "worker-comfyui: No network volume detected, using local model storage"
 fi
 
-if [ ! -d /runpod-volume ]; then
+# GitHub deployments run their container smoke test without attaching endpoint
+# storage. Permit that explicit test mode to validate ComfyUI and the handler,
+# while keeping the Network Volume mandatory for every production worker.
+if [ "${CATLINE_BUILD_TEST:-false}" = "true" ]; then
+    echo "worker-comfyui: RunPod build-test mode; skipping model-volume validation"
+    MODEL_READY_MARKER=/tmp/catline-build-test.verified
+    printf 'build-test\n' > "${MODEL_READY_MARKER}"
+elif [ ! -d /runpod-volume ]; then
     echo "worker-comfyui: /runpod-volume is required in production" >&2
     exit 1
+else
+    echo "worker-comfyui: Validating immutable model manifest..."
+    MODEL_READY_MARKER=$(python /opt/catline/verify_models.py \
+        --manifest /opt/catline/models.json --base /runpod-volume/models)
 fi
-echo "worker-comfyui: Validating immutable model manifest..."
-MODEL_READY_MARKER=$(python /opt/catline/verify_models.py \
-    --manifest /opt/catline/models.json --base /runpod-volume/models)
 export MODEL_READY_MARKER
 
 # Use libtcmalloc for better memory management
