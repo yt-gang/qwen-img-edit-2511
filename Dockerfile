@@ -62,6 +62,7 @@ ADD src/extra_model_paths.yaml /comfyui/
 # Install pinned Python runtime dependencies for the handler
 COPY requirements.txt /tmp/worker-requirements.txt
 RUN uv pip install -r /tmp/worker-requirements.txt
+RUN python -c "import huggingface_hub, transformers; from transformers import CLIPTokenizer; print(f'transformers={transformers.__version__} huggingface_hub={huggingface_hub.__version__}')"
 
 # Add custom node install script
 COPY scripts/comfy-node-install.sh /usr/local/bin/comfy-node-install
