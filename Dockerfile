@@ -11,6 +11,7 @@ ARG BUILD_VERSION=dev
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PIP_PREFER_BINARY=1
+ENV UV_NO_CACHE=1
 ENV PYTHONUNBUFFERED=1
 ENV CMAKE_BUILD_PARALLEL_LEVEL=8
 
@@ -27,10 +28,9 @@ RUN apt-get update && apt-get install -y \
     libxrender1 \
     ffmpeg \
     && ln -sf /usr/bin/python3.12 /usr/bin/python \
-    && ln -sf /usr/bin/pip3 /usr/bin/pip
-
-# Clean up to reduce image size
-RUN apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
+    && ln -sf /usr/bin/pip3 /usr/bin/pip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install uv and create venv
 RUN wget -qO- https://astral.sh/uv/install.sh | sh \
@@ -43,26 +43,23 @@ ENV PATH="/opt/venv/bin:${PATH}"
 # Install comfy-cli + dependencies
 RUN uv pip install comfy-cli==1.20.0 pip==25.2 setuptools==80.9.0 wheel==0.45.1
 
-# Install ComfyUI
+# Install ComfyUI and all runtime packages in one layer. Keeping the initial
+# PyTorch install and the final cu128 replacement in separate layers retains
+# both copies and makes the RunPod OCI export exceed its 30-minute limit.
+COPY requirements.txt /tmp/worker-requirements.txt
 RUN if [ -n "${CUDA_VERSION_FOR_COMFY}" ]; then \
       /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --cuda-version "${CUDA_VERSION_FOR_COMFY}" --nvidia --fast-deps; \
     else \
       /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --nvidia --fast-deps; \
-    fi
-
-# Install ComfyUI runtime requirements
-RUN uv pip install -r /comfyui/requirements.txt
-
-# Force-install PyTorch cu128 for Blackwell (RTX 5090) and backwards compatibility
-RUN uv pip install --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+    fi \
+    && uv pip install -r /comfyui/requirements.txt \
+    && uv pip install --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128 \
+    && uv pip install -r /tmp/worker-requirements.txt \
+    && python -c "import huggingface_hub, transformers; from transformers import CLIPTokenizer; print(f'transformers={transformers.__version__} huggingface_hub={huggingface_hub.__version__}')" \
+    && uv cache clean
 
 # Support for the network volume
 ADD src/extra_model_paths.yaml /comfyui/
-
-# Install pinned Python runtime dependencies for the handler
-COPY requirements.txt /tmp/worker-requirements.txt
-RUN uv pip install -r /tmp/worker-requirements.txt
-RUN python -c "import huggingface_hub, transformers; from transformers import CLIPTokenizer; print(f'transformers={transformers.__version__} huggingface_hub={huggingface_hub.__version__}')"
 
 # Add custom node install script
 COPY scripts/comfy-node-install.sh /usr/local/bin/comfy-node-install

@@ -33,6 +33,21 @@ def test_comfyui_version_is_pinned_consistently():
     assert bake_version == docker_version
 
 
+def test_python_runtime_is_installed_without_duplicate_heavy_layers():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    dependency_block = re.search(
+        r"RUN if \[ -n .*?&& uv cache clean",
+        dockerfile,
+        re.DOTALL,
+    ).group(0)
+
+    assert "ENV UV_NO_CACHE=1" in dockerfile
+    assert "comfy --workspace /comfyui install" in dependency_block
+    assert "uv pip install -r /comfyui/requirements.txt" in dependency_block
+    assert "uv pip install --force-reinstall torch torchvision torchaudio" in dependency_block
+    assert "uv pip install -r /tmp/worker-requirements.txt" in dependency_block
+
+
 def test_runpod_cuda_host_versions_are_compatible_and_consistent():
     tests_config = json.loads((ROOT / ".runpod/tests.json").read_text(encoding="utf-8"))
     hub_config = json.loads((ROOT / ".runpod/hub.json").read_text(encoding="utf-8"))
