@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 from pathlib import Path
 
@@ -30,6 +31,15 @@ def test_comfyui_version_is_pinned_consistently():
 
     assert docker_version == "v0.36.0"
     assert bake_version == docker_version
+
+
+def test_runpod_cuda_host_versions_are_compatible_and_consistent():
+    tests_config = json.loads((ROOT / ".runpod/tests.json").read_text(encoding="utf-8"))
+    hub_config = json.loads((ROOT / ".runpod/hub.json").read_text(encoding="utf-8"))
+
+    expected = ["13.3", "13.2", "13.1", "13.0", "12.9", "12.8"]
+    assert tests_config["config"]["allowedCudaVersions"] == expected
+    assert hub_config["config"]["allowedCudaVersions"] == expected
 
 
 def test_cfg_norm_matches_official_qwen_2511_workflow():

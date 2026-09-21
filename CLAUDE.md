@@ -63,4 +63,4 @@ Release: `gh release create v1.X.Y --title "v1.X.Y" --notes "description"`
 
 ## RunPod Hub Tests
 
-`.runpod/tests.json` — health_check only (300s timeout, RTX 4090, CUDA 12.8).
+`.runpod/tests.json` — health_check only (300s timeout, RTX 4090, CUDA 12.8–13.3 hosts).
