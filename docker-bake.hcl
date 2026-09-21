@@ -11,7 +11,7 @@ variable "RELEASE_VERSION" {
 }
 
 variable "COMFYUI_VERSION" {
-  default = "latest"
+  default = "v0.36.0"
 }
 
 variable "BASE_IMAGE" {

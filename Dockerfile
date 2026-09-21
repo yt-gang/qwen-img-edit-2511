@@ -4,7 +4,7 @@ ARG BASE_IMAGE=nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04
 # Stage 1: Base image with all dependencies
 FROM ${BASE_IMAGE} AS base
 
-ARG COMFYUI_VERSION=v0.3.76
+ARG COMFYUI_VERSION=v0.36.0
 ARG CUDA_VERSION_FOR_COMFY
 ARG COMFY_CUSTOM_NODES=
 ARG BUILD_VERSION=dev

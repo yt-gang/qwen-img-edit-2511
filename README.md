@@ -2,6 +2,9 @@
 
 # Qwen Image Edit 2511
 
+The container pins ComfyUI `v0.36.0`. Keep this aligned with the current
+official Qwen Image Edit 2511 workflow before deploying a new worker image.
+
 ## Catline production contract
 
 This fork's production path requires a pre-seeded RunPod Network Volume. Startup validates the pinned

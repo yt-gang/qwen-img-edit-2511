@@ -204,7 +204,7 @@ DEFAULT_WORKFLOW = {
         "_meta": {"title": "TextEncodeQwenImageEditPlus (Positive)"}
     },
     "170:152": {
-        "inputs": {"strength": 1, "model": ["170:145", 0]},
+        "inputs": {"strength": 1, "pre_cfg": False, "model": ["170:145", 0]},
         "class_type": "CFGNorm",
         "_meta": {"title": "CFGNorm"}
     },
