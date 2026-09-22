@@ -83,8 +83,8 @@ WORKDIR /comfyui
 COPY scripts/comfy-manager-set-mode.sh /usr/local/bin/comfy-manager-set-mode
 RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 
-COPY models.json scripts/verify_models.py scripts/seed_models.py /opt/catline/
-RUN chmod +x /opt/catline/verify_models.py /opt/catline/seed_models.py
+COPY models.json scripts/verify_models.py scripts/seed_models.py scripts/resolve_model_base.py /opt/catline/
+RUN chmod +x /opt/catline/verify_models.py /opt/catline/seed_models.py /opt/catline/resolve_model_base.py
 
 # Go back to root for handler files
 WORKDIR /

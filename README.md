@@ -11,6 +11,9 @@ This fork's production path requires a pre-seeded RunPod Network Volume. Startup
 `models.json` manifest and its full-verification marker and never downloads weights. Seed the shared
 volume once with `python /opt/catline/seed_models.py` from a temporary Pod.
 
+For faster cold starts, the same exact model set can be served from RunPod's
+host-local Hugging Face Model Cache. See [`docs/CACHED_MODEL.md`](docs/CACHED_MODEL.md).
+
 Catline sends one to three private R2 reference URLs. Only HTTPS hosts listed in
 `R2_ALLOWED_DOWNLOAD_HOSTS` are accepted. References are normalized to the `1080x1920` canvas and
 removed from the ComfyUI input directory after the job. The result is a single lossless WebP uploaded
